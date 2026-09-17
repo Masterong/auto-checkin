@@ -15,6 +15,7 @@
 """
 
 import os
+import re
 import json
 import datetime
 import traceback
@@ -90,77 +91,133 @@ def already_done_today(history, platform):
 # ---------------------------------------------------------------------------
 
 def checkin_smzdm(cookie):
+    """什么值得买：2026 年现行接口为 jsonp_checkin（GET），旧 ajax_checkin 已 404。"""
     if not cookie:
         return {"status": "not_configured", "message": "未配置 SMZDM_COOKIE"}
-    url = "https://zhiyou.smzdm.com/user/checkin/ajax_checkin"
+    url = "https://zhiyou.smzdm.com/user/checkin/jsonp_checkin"
     headers = {
-        "User-Agent": UA,
-        "Origin": "https://zhiyou.smzdm.com",
-        "Referer": "https://zhiyou.smzdm.com/user/checkin",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
+        # 用 iPhone 版 UA + 主站 Referer，与现行开源脚本一致
+        "User-Agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) "
+                       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 "
+                       "Mobile/15E148 Safari/604.1"),
+        "Host": "zhiyou.smzdm.com",
+        "Referer": "https://www.smzdm.com/",
+        "Accept": "*/*",
         "Cookie": cookie,
     }
     try:
-        r = requests.post(url, headers=headers, timeout=25)
+        r = requests.get(url, headers=headers, timeout=25)
     except Exception as e:
         return {"status": "failed", "message": "网络请求异常：%s" % e}
 
-    # 优先按 JSON 解析
+    text = (r.text or "").strip()
+    # 可能被 JSONP 回调包裹：jQueryxxx({...}) → 取出括号内 JSON
+    if not text.startswith("{"):
+        m = re.search(r"\((.*)\)\s*;?\s*$", text, re.S)
+        if m:
+            text = m.group(1)
     try:
-        j = r.json()
+        j = json.loads(text)
     except Exception:
-        j = None
+        return {"status": "failed",
+                "message": "返回异常(HTTP %s)，可能被风控或 cookie 失效" % r.status_code}
 
-    if isinstance(j, dict):
-        code = j.get("error_code")
-        msg = str(j.get("error_msg", ""))
-        # 未登录 / cookie 失效
-        if code in (1, 2) or "登录" in msg:
-            if "登录" in msg:
-                return {"status": "expired", "message": "cookie 可能已失效：%s" % msg}
-        if code == 0:
-            if "已" in msg and "签" in msg:
-                return {"status": "duplicate", "message": msg or "今日已签到"}
-            return {"status": "success", "message": msg or "签到成功"}
-        return {"status": "failed", "message": msg or ("返回码 %s" % code)}
-
-    # 拿不到 JSON（可能被风控拦截 / 需要验证码）
-    return {"status": "failed",
-            "message": "返回异常(HTTP %s)，可能被风控或 cookie 失效" % r.status_code}
+    code = j.get("error_code")
+    msg = str(j.get("error_msg", ""))
+    if code == 0:
+        data = j.get("data") or {}
+        days = data.get("continue_checkin_days") or data.get("checkin_num")
+        extra = ("，连签 %s 天" % days) if days else ""
+        if "已" in msg and "签" in msg:
+            return {"status": "duplicate", "message": (msg or "今日已签到") + extra}
+        return {"status": "success", "message": (msg or "签到成功") + extra}
+    if code == -1:
+        return {"status": "failed", "message": "网络繁忙(error_code=-1)，可稍后重试"}
+    if "登录" in msg:
+        return {"status": "expired", "message": "cookie 可能已失效：%s" % msg}
+    if "已" in msg and "签" in msg:
+        return {"status": "duplicate", "message": msg or "今日已签到"}
+    return {"status": "failed", "message": msg or ("返回码 %s" % code)}
 
 
 # ---------------------------------------------------------------------------
 # 平台二：吾爱破解
 # ---------------------------------------------------------------------------
 
+# 全套真实浏览器指纹头：吾爱 2025-2026 上了"安域防护"WAF，头不全极易被拦
+POJIE_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"),
+    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,image/apng,*/*;q=0.8"),
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not_A Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
+def _decode_pojie(resp):
+    """Discuz 页面是 gbk，WAF 挑战页是 utf-8，按实际 charset 解码。"""
+    head = resp.content[:2000].lower()
+    resp.encoding = "gbk" if b"charset=gbk" in head else "utf-8"
+    return resp.text or ""
+
+
+def _pojie_waf_blocked(text):
+    """识别'安域防护'JS 挑战页（utf-8 空壳 / 含挑战变量）。"""
+    if "安域防护" in text:
+        return True
+    if "LZ='" in text or "LJ='" in text or "waf_zw_verify" in text:
+        return True
+    low = text.strip().lower()
+    return (low.startswith("<!doctype html") and "messagetext" not in text
+            and len(text) < 2000)
+
+
 def checkin_52pojie(cookie):
     if not cookie:
         return {"status": "not_configured", "message": "未配置 POJIE_COOKIE"}
-    headers = {
-        "User-Agent": UA,
-        "Referer": "https://www.52pojie.cn/",
-        "Cookie": cookie,
-    }
-    base = "https://www.52pojie.cn/home.php?mod=task&do=%s&id=2"
+    s = requests.Session()
+    s.headers.update(POJIE_HEADERS)
+    s.headers["Cookie"] = cookie
+
+    home = "https://www.52pojie.cn/"
+    apply_url = "https://www.52pojie.cn/home.php?mod=task&do=apply&id=2&referer=%2F"
+    draw_url = "https://www.52pojie.cn/home.php?mod=task&do=draw&id=2"
+
+    def get(url, referer):
+        h = dict(s.headers)
+        h["Referer"] = referer
+        return s.get(url, headers=h, timeout=25)
+
     try:
-        # 先尝试领取任务，再签到（已领取会返回提示，不影响后续）
-        requests.get(base % "apply", headers=headers, timeout=25)
-        r = requests.get(base % "draw", headers=headers, timeout=25)
+        get(home, home)                      # 先访问首页建立会话
+        r_apply = get(apply_url, home)       # 领取任务
+        t_apply = _decode_pojie(r_apply)
+        if _pojie_waf_blocked(t_apply):
+            return {"status": "failed",
+                    "message": "被吾爱'安域防护'JS 盾拦截（云端 IP 触发），本次未签到"}
+        r_draw = get(draw_url, apply_url)    # 真正签到
     except Exception as e:
         return {"status": "failed", "message": "网络请求异常：%s" % e}
 
-    # 吾爱破解是 Discuz 论坛，页面为 GBK 编码
-    r.encoding = "gbk"
-    text = r.text or ""
-
-    if "请先登录" in text or ("登录" in text and "签到" not in text):
+    text = _decode_pojie(r_draw)
+    if _pojie_waf_blocked(text):
+        return {"status": "failed",
+                "message": "被吾爱'安域防护'JS 盾拦截（云端 IP 触发），本次未签到"}
+    if "您需要先登录" in text or "请先登录" in text:
         return {"status": "expired", "message": "cookie 可能已失效，请重新登录获取"}
     if "恭喜" in text or "签到成功" in text or "领取成功" in text:
         return {"status": "success", "message": "签到成功"}
-    if "已经签到" in text or "已签到" in text or "已领取" in text or "已经完成" in text:
+    if ("不是进行中的任务" in text or "已完成" in text or "已经签到" in text
+            or "已签到" in text or "已领取" in text):
         return {"status": "duplicate", "message": "今日已签到"}
-    # 兜底：截取一小段可读文本，方便排查
     snippet = "".join(ch for ch in text if ch.isprintable())[:60]
     return {"status": "failed", "message": "未识别到签到结果：%s" % (snippet or "空响应")}
 
