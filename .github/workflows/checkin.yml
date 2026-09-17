@@ -1,0 +1,46 @@
+name: 自动签到
+
+on:
+  schedule:
+    - cron: '10 0 * * *'
+    - cron: '0 14 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 执行签到
+        env:
+          SMZDM_COOKIE: ${{ secrets.SMZDM_COOKIE }}
+          POJIE_COOKIE: ${{ secrets.POJIE_COOKIE }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          SCT_SENDKEY: ${{ secrets.SCT_SENDKEY }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python checkin.py
+
+      - name: 把签到结果提交回仓库
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/status.json
+          if git diff --staged --quiet; then
+            echo "结果无变化，跳过提交"
+          else
+            git commit -m "chore: 更新签到结果 $(date -u +'%Y-%m-%d %H:%M') UTC [skip ci]"
+            git push
+          fi
