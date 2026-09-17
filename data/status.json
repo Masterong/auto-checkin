@@ -1,5 +1,21 @@
 {
-  "updated_at": null,
-  "platforms": ["smzdm", "52pojie"],
-  "history": {}
+  "updated_at": "2026-09-17T09:29:27+08:00",
+  "platforms": [
+    "smzdm",
+    "52pojie"
+  ],
+  "history": {
+    "2026-09-17": {
+      "smzdm": {
+        "status": "failed",
+        "message": "返回异常(HTTP 404)，可能被风控或 cookie 失效",
+        "time": "09:29"
+      },
+      "52pojie": {
+        "status": "failed",
+        "message": "未识别到签到结果：<!DOCTYPE HTML><html><head>    <meta charset=\"utf-8\"></head>",
+        "time": "09:29"
+      }
+    }
+  }
 }
