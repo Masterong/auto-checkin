@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>我的自动签到台</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#1a2130; --card2:#212a3d; --line:#26304a;
+    --txt:#e8ecf4; --sub:#8b97ad; --ok:#31d07a; --dup:#4aa3ff;
+    --warn:#ffb020; --err:#ff5c6c; --idle:#5a6478;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(160deg,#0f1420,#141b2b 60%,#0f1420);
+    color:#e8ecf4;min-height:100vh;padding:16px 14px 40px;
+  }
+  .wrap{max-width:520px;margin:0 auto}
+  header{text-align:center;padding:10px 0 18px}
+  header h1{font-size:22px;letter-spacing:1px}
+  header p{color:#8b97ad;font-size:12px;margin-top:6px}
+  .updated{color:#6f7c93;font-size:11px;margin-top:8px}
+
+  .card{
+    background:#1a2130;border:1px solid #26304a;border-radius:16px;
+    padding:16px;margin-bottom:14px;box-shadow:0 6px 20px rgba(0,0,0,.25);
+  }
+  .row{display:flex;align-items:center;justify-content:space-between}
+  .pname{font-size:16px;font-weight:600}
+  .badge{font-size:12px;padding:4px 10px;border-radius:999px;font-weight:600}
+  .b-success{background:rgba(49,208,122,.15);color:#31d07a}
+  .b-duplicate{background:rgba(74,163,255,.15);color:#4aa3ff}
+  .b-expired{background:rgba(255,176,32,.15);color:#ffb020}
+  .b-failed{background:rgba(255,92,108,.15);color:#ff5c6c}
+  .b-not_configured{background:rgba(140,150,170,.15);color:#9aa5b8}
+  .msg{color:#8b97ad;font-size:13px;margin-top:10px;line-height:1.5;word-break:break-all}
+  .streak{margin-top:12px;font-size:13px;color:#ffb020;font-weight:600}
+
+  .grid{display:flex;flex-wrap:wrap;gap:5px;margin-top:14px}
+  .dot{width:15px;height:15px;border-radius:4px;background:#26304a}
+  .dot.success{background:#31d07a}
+  .dot.duplicate{background:#4aa3ff}
+  .dot.expired{background:#ffb020}
+  .dot.failed{background:#ff5c6c}
+  .dot.not_configured{background:#39415a}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:11px;color:#8b97ad}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+  .section-title{font-size:13px;color:#8b97ad;margin:4px 2px 10px;font-weight:600}
+  .btn{
+    display:block;width:100%;text-align:center;text-decoration:none;
+    background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;
+    padding:14px;border-radius:14px;font-size:15px;font-weight:600;margin-bottom:10px;
+  }
+  .btn.ghost{background:#212a3d;border:1px solid #2f3b56;color:#c3ccdd}
+  .note{font-size:11px;color:#6f7c93;line-height:1.6;margin-top:6px}
+  .empty{text-align:center;color:#8b97ad;padding:30px 10px;font-size:14px;line-height:1.8}
+  a{color:#4aa3ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🗓️ 我的自动签到台</h1>
+    <p>每天云端自动签到，这里随时查看结果</p>
+    <div class="updated" id="updated">正在读取数据…</div>
+  </header>
+
+  <div id="cards"></div>
+
+  <div class="section-title">近 35 天签到记录</div>
+  <div class="card">
+    <div id="calendars"></div>
+    <div class="legend">
+      <span><i style="background:#31d07a"></i>签到成功</span>
+      <span><i style="background:#4aa3ff"></i>已签到</span>
+      <span><i style="background:#ffb020"></i>凭证失效</span>
+      <span><i style="background:#ff5c6c"></i>失败</span>
+      <span><i style="background:#39415a"></i>未运行</span>
+    </div>
+  </div>
+
+  <div class="section-title">操作</div>
+  <a class="btn" id="runBtn" href="#" target="_blank">▶ 立即签到 / 手动补签</a>
+  <a class="btn ghost" id="actBtn" href="#" target="_blank">查看运行日志（GitHub Actions）</a>
+  <p class="note">
+    点上面的按钮会打开 GitHub，需要登录你的 GitHub 账号，然后点绿色的
+    “Run workflow” 即可立即触发一次签到。<br><br>
+    ⚠️ 免责提示：自动签到可能违反部分平台的服务条款，账号风险请自行承担；
+    凭证（cookie）只保存在你私有仓库的 Secrets 里，本页面展示的均为脱敏数据。
+  </p>
+</div>
+
+<script>
+// 平台展示名（和 checkin.py 里的 PLATFORMS 保持一致）
+var NAMES = { smzdm: "什么值得买", "52pojie": "吾爱破解" };
+var STATUS_TXT = {
+  success: "签到成功", duplicate: "今日已签到", expired: "凭证失效，需更新",
+  failed: "签到失败", not_configured: "未配置凭证"
+};
+
+// 自动从 GitHub Pages 网址推断仓库地址（无需手填）
+function guessRepo() {
+  var host = location.hostname;             // 例如 zhangsan.github.io
+  var owner = host.split(".")[0];
+  var repo = location.pathname.split("/")[1] || "";
+  if (owner && repo && host.indexOf("github.io") > -1) {
+    return "https://github.com/" + owner + "/" + repo;
+  }
+  return "https://github.com/"; // 兜底：需要你手动改成自己的仓库地址
+}
+var REPO = guessRepo();
+document.getElementById("runBtn").href = REPO + "/actions/workflows/checkin.yml";
+document.getElementById("actBtn").href = REPO + "/actions";
+
+function esc(s){return (s==null?"":String(s)).replace(/[&<>"]/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+
+function computeStreak(history, key, todayStr){
+  var streak = 0;
+  var d = new Date(todayStr + "T00:00:00");
+  if(!history[todayStr] || !history[todayStr][key]){
+    d.setDate(d.getDate()-1);
+  }
+  for(var i=0;i<3650;i++){
+    var ds = d.toISOString().slice(0,10);
+    var rec = history[ds] && history[ds][key];
+    if(rec && (rec.status==="success"||rec.status==="duplicate")){
+      streak++; d.setDate(d.getDate()-1);
+    } else break;
+  }
+  return streak;
+}
+
+function render(data){
+  var history = data.history || {};
+  var keys = data.platforms || Object.keys(NAMES);
+  // 今天（北京时间）
+  var now = new Date(Date.now() + (8*60 + new Date().getTimezoneOffset())*60000);
+  var todayStr = now.toISOString().slice(0,10);
+
+  document.getElementById("updated").textContent =
+    data.updated_at ? ("最后更新：" + data.updated_at.replace("T"," ") + "（北京时间）")
+                    : "还没有签到记录，去下面点“立即签到”跑一次吧";
+
+  var cards = "";
+  keys.forEach(function(k){
+    var rec = history[todayStr] && history[todayStr][k];
+    var st = rec ? rec.status : "not_configured";
+    var msg = rec ? rec.message : "今天还没有运行记录";
+    var streak = computeStreak(history, k, todayStr);
+    cards += '<div class="card"><div class="row">'
+      + '<div class="pname">'+esc(NAMES[k]||k)+'</div>'
+      + '<div class="badge b-'+st+'">'+(STATUS_TXT[st]||st)+'</div></div>'
+      + '<div class="msg">'+esc(msg)+(rec&&rec.time?('（'+rec.time+'）'):'')+'</div>'
+      + (streak>0?('<div class="streak">🔥 已连签 '+streak+' 天</div>'):'')
+      + '</div>';
+  });
+  document.getElementById("cards").innerHTML = cards;
+
+  // 近 35 天日历
+  var cal = "";
+  keys.forEach(function(k){
+    var dots = "";
+    for(var i=34;i>=0;i--){
+      var d = new Date(todayStr+"T00:00:00"); d.setDate(d.getDate()-i);
+      var ds = d.toISOString().slice(0,10);
+      var rec = history[ds] && history[ds][k];
+      var cls = rec ? rec.status : "";
+      dots += '<div class="dot '+cls+'" title="'+ds+'"></div>';
+    }
+    cal += '<div style="margin-bottom:16px"><div style="font-size:13px;margin-bottom:8px;color:#c3ccdd;font-weight:600">'
+      + esc(NAMES[k]||k) + '</div><div class="grid">'+dots+'</div></div>';
+  });
+  document.getElementById("calendars").innerHTML = cal;
+}
+
+// 带时间戳避免 CDN 缓存
+fetch("./data/status.json?t=" + Date.now())
+  .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(render)
+  .catch(function(e){
+    document.getElementById("updated").textContent = "读取数据失败";
+    document.getElementById("cards").innerHTML =
+      '<div class="empty">还没读到签到数据 😴<br><br>'
+      + '可能原因：<br>1. 还没配置 cookie 并运行过一次签到<br>'
+      + '2. GitHub Pages 还没开启（见 README 第 5 步）<br>'
+      + '3. 页面刚部署，稍等 1-2 分钟刷新<br><br>'
+      + '<span style="color:#6f7c93;font-size:12px">错误：'+esc(e.message)+'</span></div>';
+  });
+</script>
+</body>
+</html>
