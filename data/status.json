@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-10-14T04:05:06+08:00",
+  "updated_at": "2026-10-14T12:42:42+08:00",
   "platforms": [
     "smzdm",
     "52pojie"
@@ -331,14 +331,14 @@
     },
     "2026-10-14": {
       "smzdm": {
-        "status": "failed",
-        "message": "验证码输入错误，请重新输入",
-        "time": "04:05"
+        "status": "success",
+        "message": "签到成功，连签 5 天",
+        "time": "12:42"
       },
       "52pojie": {
         "status": "failed",
         "message": "被吾爱'安域防护'JS 盾拦截（云端 IP 触发），本次未签到",
-        "time": "04:05"
+        "time": "12:42"
       }
     }
   }
