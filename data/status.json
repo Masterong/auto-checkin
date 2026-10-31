@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-10-31T13:22:17+08:00",
+  "updated_at": "2026-11-01T02:10:19+08:00",
   "platforms": [
     "smzdm",
     "52pojie"
@@ -543,6 +543,18 @@
         "status": "failed",
         "message": "被吾爱'安域防护'JS 盾拦截（云端 IP 触发），本次未签到",
         "time": "13:22"
+      }
+    },
+    "2026-11-01": {
+      "smzdm": {
+        "status": "failed",
+        "message": "网络请求异常：HTTPSConnectionPool(host='zhiyou.smzdm.com', port=443): Max retries exceeded with url: /user/checkin/jsonp_checkin (Caused by ConnectTimeoutError(<HTTPSConnection(host='zhiyou.smzdm.com', port=443) at 0x7059b323edd0>, 'Connection to zhiyou.smzdm.com timed out. (connect timeout=25)'))",
+        "time": "02:10"
+      },
+      "52pojie": {
+        "status": "failed",
+        "message": "被吾爱'安域防护'JS 盾拦截（云端 IP 触发），本次未签到",
+        "time": "02:10"
       }
     }
   }
